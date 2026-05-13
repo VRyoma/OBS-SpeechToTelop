@@ -1,0 +1,86 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-14
+            cmake_generator: Xcode
+            cmake_config: RelWithDebInfo
+
+          - name: Windows
+            os: windows-2022
+            cmake_generator: "Visual Studio 17 2022"
+            cmake_config: RelWithDebInfo
+
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # ── macOS dependencies ────────────────────────────────────────────────
+      - name: Install OBS and test dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake googletest curl pkg-config
+          # Install OBS Studio (provides libobs headers + cmake config)
+          brew tap obsproject/obs-studio
+          brew install obs-studio
+          echo "libobs_DIR=$(brew --prefix obs-studio)/lib/cmake/libobs" >> $GITHUB_ENV
+
+      # ── Windows dependencies ─────────────────────────────────────────────
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
+          choco install vcpkg -y
+          vcpkg integrate install
+          vcpkg install gtest:x64-windows curl:x64-windows
+          echo "VCPKG_ROOT=$(vcpkg prompt %VCPKG_ROOT%)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        shell: pwsh
+
+      # ── Configure ────────────────────────────────────────────────────────
+      - name: Configure (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cmake -B build -G "${{ matrix.cmake_generator }}" \
+            -DCMAKE_BUILD_TYPE=${{ matrix.cmake_config }} \
+            -DGTEST_ROOT=$(brew --prefix googletest) \
+            -Dlibobs_DIR="${{ env.libobs_DIR }}"
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cmake -B build -G "${{ matrix.cmake_generator }}" `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DCMAKE_PREFIX_PATH="$env:VCPKG_INSTALLED_DIR/x64-windows"
+        shell: pwsh
+
+      # ── Build ─────────────────────────────────────────────────────────────
+      - name: Build
+        run: cmake --build build --config ${{ matrix.cmake_config }} --parallel
+
+      # ── Unit tests (pure C++, no OBS required) ────────────────────────────
+      - name: Run unit tests (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          ctest --build-dir build --output-on-failure -C ${{ matrix.cmake_config }}
+
+      - name: Run unit tests (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          ctest --build-dir build --output-on-failure -C ${{ matrix.cmake_config }}
+        shell: pwsh
