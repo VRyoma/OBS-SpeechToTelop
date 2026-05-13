@@ -9,6 +9,7 @@ OBS Studio plugin that transcribes microphone input in real-time and displays st
 - **Language**: Japanese (extensible to English later)
 - **STT**: whisper.cpp (local) + cloud API (OpenAI Whisper API) selectable
 - **Display**: Single-line telop with configurable variety-show style effects
+- **Multi-instance**: Multiple audio sources (mic, Discord, game VC, etc.) each with independent telop output
 - **Platform**: macOS + Windows
 - **Latency/accuracy**: User-adjustable balance
 
@@ -34,10 +35,26 @@ Three-thread pipeline connected by lock-free structures:
 
 ### Shared State
 
-A singleton `SpeechToTelop` instance bridges all components. Both the audio filter and telop source access it via OBS `void*` context.
+Each audio filter creates its own independent `Pipeline` instance (ring buffer + STT thread + text queue). Telop sources link to a specific pipeline via a dropdown selector. A global `PipelineRegistry` manages all active instances.
 
 - Audio Filter -> STT Engine: Lock-free ring buffer (high-frequency, continuous audio stream)
 - STT Engine -> Telop Source: `std::mutex` + `std::string` (low-frequency text updates)
+- whisper.cpp model weights are shared across all pipeline instances to conserve memory
+
+### Multi-Instance Architecture
+
+Multiple audio sources can each have their own filter and telop output:
+
+```
+[Microphone] -- [Filter A] -- [Pipeline A] -- [Telop "MC"]
+[Discord]    -- [Filter B] -- [Pipeline B] -- [Telop "Guest"]
+[Game VC]    -- [Filter C] -- [Pipeline C] -- [Telop "Game"]
+```
+
+- Each filter instance gets a unique ID (e.g. "SpeechToTelop-0", "SpeechToTelop-1")
+- Pipeline registry tracks all active pipelines by ID
+- Telop source properties include a dropdown listing available pipelines
+- If a pipeline's filter is removed, its telop source shows "(no audio source)"
 
 ## STT Engine
 
@@ -120,9 +137,10 @@ Sentence-boundary mode timeout is configurable (default: 5 seconds).
 
 ### User Setup Flow
 
-1. Add "Speech to Telop Filter" to an audio source (mic) in OBS
+1. Add "Speech to Telop Filter" to one or more audio sources (mic, Discord, etc.) in OBS
 2. Add "Speech to Telop Source" to a scene in OBS
-3. Configure properties on the telop source
+3. In the telop source properties, select which audio filter to link to via dropdown
+4. Configure STT and telop display properties
 
 ### Settings UI
 
@@ -162,7 +180,10 @@ Speed/Accuracy Balance slider label: "反応速度" (left) to "精度重視" (ri
 
 ### Instance Coordination
 
-Audio filter and telop source share the `SpeechToTelop` singleton. If multiple filters are attached, only the first one is active.
+- `PipelineRegistry` (global) tracks all active pipelines by unique ID
+- Each audio filter registers its pipeline on creation, unregisters on destruction
+- Telop source links to a pipeline via dropdown; links to "(none)" if selected pipeline is gone
+- whisper.cpp model weights shared via reference counting — unloaded when last pipeline using it stops
 
 ## Build & Cross-Platform
 
@@ -173,7 +194,8 @@ SpeechToTelop/
 ├── CMakeLists.txt
 ├── src/
 │   ├── plugin-main.cpp
-│   ├── speech-to-telop.h/cpp
+│   ├── pipeline-registry.h/cpp
+│   ├── pipeline.h/cpp
 │   ├── audio-filter.h/cpp
 │   ├── stt-engine.h/cpp
 │   ├── stt-whisper.h/cpp
@@ -208,3 +230,4 @@ SpeechToTelop/
 - Multi-line stacked display
 - Furigana rendering
 - Telop design presets ("Variety", "News", etc.)
+- Per-pipeline speaker identification / labeling
