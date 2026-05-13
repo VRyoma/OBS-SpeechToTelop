@@ -30,6 +30,12 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Cache whisper.cpp
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: whisper-v1.7.3-${{ runner.os }}
+
       # ── macOS dependencies ────────────────────────────────────────────────
       - name: Install OBS and test dependencies (macOS)
         if: runner.os == 'macOS'
