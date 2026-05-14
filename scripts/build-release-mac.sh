@@ -51,15 +51,25 @@ fi
 # 4a. Remove Xcode-generator requirement (compilerconfig.cmake)
 COMPILER_CFG="$OBS_DIR/cmake/macos/compilerconfig.cmake"
 if [ -f "$COMPILER_CFG" ]; then
-    # Remove Xcode-generator requirement
+    # 1. Remove Xcode-generator requirement
     sed -i '' \
         's/message(FATAL_ERROR "Building OBS Studio on macOS requires Xcode generator\.")/message(STATUS "Xcode generator not required (patched for CLT build)")/' \
         "$COMPILER_CFG"
-    # Bypass SDK version check (xcrun returns empty with CLT-only setups)
+    # 2. Neutralise SDK version threshold (belt)
     sed -i '' \
         's/VERSION_LESS "14\.2"/VERSION_LESS "0.0"/' \
         "$COMPILER_CFG"
+    # 3. Demote FATAL_ERROR to STATUS (suspenders: handles NOT SDK_VERSION branch)
+    sed -i '' \
+        's/message(FATAL_ERROR "Your macOS SDK version/message(STATUS "Patched - SDK version check bypassed:/' \
+        "$COMPILER_CFG"
     echo "Patched: removed Xcode generator + SDK version requirements"
+fi
+
+# Clear stale cmake cache so patched files are picked up on re-runs
+if [ -f "$OBS_BUILD/CMakeCache.txt" ]; then
+    rm "$OBS_BUILD/CMakeCache.txt"
+    echo "Cleared stale cmake cache"
 fi
 
 # 4b. Remove media-playback (needs FFmpeg, not required by libobs)
