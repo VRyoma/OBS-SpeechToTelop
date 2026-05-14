@@ -107,7 +107,7 @@ static void get_defaults(obs_data_t* settings) {
     obs_data_set_default_double(settings, "display_duration", 5.0);
 }
 
-static bool populate_pipeline_list(obs_properties_t*, obs_property_t* prop, void*) {
+static bool populate_pipeline_list(void*, obs_properties_t*, obs_property_t* prop, obs_data_t*) {
     obs_property_list_clear(prop);
     obs_property_list_add_string(prop, "(none)", "");
     for (const auto& id : PipelineRegistry::global().list_ids())
@@ -121,7 +121,7 @@ static obs_properties_t* get_properties(void* data) {
     obs_property_t* pipeline_prop = obs_properties_add_list(props, "pipeline_id",
         obs_module_text("Telop.Pipeline"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
     obs_property_set_modified_callback2(pipeline_prop, populate_pipeline_list, data);
-    populate_pipeline_list(props, pipeline_prop, data);
+    populate_pipeline_list(data, props, pipeline_prop, nullptr);
 
     obs_properties_add_text(props, "font", obs_module_text("Telop.Font"), OBS_TEXT_DEFAULT);
     obs_properties_add_int_slider(props, "font_size",
