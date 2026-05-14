@@ -3,9 +3,37 @@ project(SpeechToTelop VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# OBS SDK — caller sets libobs_DIR or installs libobs
-find_package(libobs REQUIRED)
-find_package(CURL REQUIRED)
+# Tests — pure-logic files, no OBS dependency
+enable_testing()
+find_package(GTest 1.14 REQUIRED)
+
+add_executable(SpeechToTelopTests
+    tests/test-ring-buffer.cpp
+    tests/test-text-buffer.cpp
+    tests/test-animation.cpp
+    tests/test-pipeline-registry.cpp
+    src/text-buffer.cpp
+    src/telop-animation.cpp
+    src/pipeline-registry.cpp
+    src/pipeline.cpp
+)
+target_include_directories(SpeechToTelopTests PRIVATE src)
+target_link_libraries(SpeechToTelopTests GTest::gtest_main)
+include(GoogleTest)
+gtest_discover_tests(SpeechToTelopTests)
+
+# OBS plugin — only built when libobs is available
+find_package(libobs QUIET)
+find_package(CURL QUIET)
+
+if(NOT libobs_FOUND)
+    message(STATUS "libobs not found — skipping plugin target (tests still build)")
+    return()
+endif()
+if(NOT CURL_FOUND)
+    message(STATUS "CURL not found — skipping plugin target")
+    return()
+endif()
 
 # whisper.cpp — fetched at configure time
 include(FetchContent)
@@ -50,22 +78,3 @@ set_target_properties(SpeechToTelop PROPERTIES PREFIX "")
 
 # Install locale data
 install(DIRECTORY data/ DESTINATION "${CMAKE_INSTALL_PREFIX}/data/obs-plugins/SpeechToTelop")
-
-# Tests — only pure-logic files, no OBS dependency
-enable_testing()
-find_package(GTest 1.14 REQUIRED)
-
-add_executable(SpeechToTelopTests
-    tests/test-ring-buffer.cpp
-    tests/test-text-buffer.cpp
-    tests/test-animation.cpp
-    tests/test-pipeline-registry.cpp
-    src/text-buffer.cpp
-    src/telop-animation.cpp
-    src/pipeline-registry.cpp
-    src/pipeline.cpp
-)
-target_include_directories(SpeechToTelopTests PRIVATE src)
-target_link_libraries(SpeechToTelopTests GTest::gtest_main)
-include(GoogleTest)
-gtest_discover_tests(SpeechToTelopTests)
