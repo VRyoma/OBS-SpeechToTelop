@@ -47,6 +47,8 @@ jobs:
       # ═══════════════════════════════════════════════════════════════════════
       - name: Install OBS + deps (macOS)
         if: runner.os == 'macOS'
+        env:
+          HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           brew install cmake googletest curl
           brew tap obsproject/obs-studio 2>/dev/null || true

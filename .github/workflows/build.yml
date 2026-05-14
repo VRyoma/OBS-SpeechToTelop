@@ -39,12 +39,16 @@ jobs:
       # ── macOS dependencies ────────────────────────────────────────────────
       - name: Install OBS and test dependencies (macOS)
         if: runner.os == 'macOS'
+        env:
+          HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           brew install cmake googletest curl pkg-config
           # Install OBS Studio (provides libobs headers + cmake config)
-          brew tap obsproject/obs-studio
+          brew tap obsproject/obs-studio 2>/dev/null || true
           brew install obs-studio
-          echo "libobs_DIR=$(brew --prefix obs-studio)/lib/cmake/libobs" >> $GITHUB_ENV
+          OBS_PREFIX="$(brew --prefix obs-studio)"
+          LIBOBS_DIR=$(find "$OBS_PREFIX" -name "libobsConfig.cmake" 2>/dev/null | head -1 | xargs -I{} dirname {} || echo "")
+          echo "libobs_DIR=${LIBOBS_DIR}" >> $GITHUB_ENV
 
       # ── Windows dependencies ─────────────────────────────────────────────
       - name: Install dependencies (Windows)
@@ -64,7 +68,7 @@ jobs:
           cmake -B build -G "${{ matrix.cmake_generator }}" \
             -DCMAKE_BUILD_TYPE=${{ matrix.cmake_config }} \
             -DGTEST_ROOT=$(brew --prefix googletest) \
-            -Dlibobs_DIR="${{ env.libobs_DIR }}"
+            ${libobs_DIR:+-Dlibobs_DIR="$libobs_DIR"}
 
       - name: Configure (Windows)
         if: runner.os == 'Windows'
