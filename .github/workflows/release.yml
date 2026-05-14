@@ -208,7 +208,7 @@ jobs:
             -DENABLE_NVENC=OFF `
             -DENABLE_DECKLINK=OFF `
             -DENABLE_VIRTUALCAM=OFF
-          cmake --build obs-build --config Release --target libobs --parallel
+          cmake --build obs-build --config Release --parallel
           cmake --install obs-build --config Release --prefix obs-install
         shell: pwsh
 
