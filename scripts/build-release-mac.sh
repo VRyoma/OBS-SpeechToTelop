@@ -2,33 +2,34 @@
 # Local release build for macOS (arm64).
 # Works with Command Line Tools only (no full Xcode required).
 # Requires: brew install ninja
-#           pip3 install 'cmake<4' --break-system-packages  (or cmake 3.x already in PATH)
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OBS_VERSION="30.1.2"
+CMAKE3_VERSION="3.31.6"
 OBS_DIR="$ROOT/.obs-studio"
 OBS_BUILD="$ROOT/.obs-build"
 OBS_INSTALL="$ROOT/.obs-install"
 BUILD_DIR="$ROOT/build-release"
+CMAKE3_DIR="$ROOT/.cmake3"
 
 # ── 1. cmake 3.x ─────────────────────────────────────────────────────────────
 # obs-studio 30.x cmake scripts are incompatible with cmake 4.x.
-# If cmake in PATH is 4.x, try to find or install cmake 3.x.
+# Download cmake 3.x binary if cmake in PATH is 4.x.
 CMAKE_BIN="cmake"
 cmake_major() { "$1" --version 2>/dev/null | head -1 | sed 's/[^0-9]*\([0-9]*\).*/\1/'; }
 
-if [ "$(cmake_major cmake)" -ge 4 ] 2>/dev/null; then
-    # Try pip-installed cmake 3.x
-    PIP_CMAKE="$(python3 -m site --user-base 2>/dev/null)/bin/cmake"
-    if [ -x "$PIP_CMAKE" ] && [ "$(cmake_major "$PIP_CMAKE")" -lt 4 ]; then
-        CMAKE_BIN="$PIP_CMAKE"
-    else
-        echo "cmake 4.x detected and cmake 3.x not found."
-        echo "Install cmake 3.x with:"
-        echo "  pip3 install 'cmake<4' --break-system-packages"
-        exit 1
+if [ "$(cmake_major cmake 2>/dev/null)" -ge 4 ] 2>/dev/null; then
+    CMAKE3_BIN="$CMAKE3_DIR/CMake.app/Contents/bin/cmake"
+    if [ ! -x "$CMAKE3_BIN" ]; then
+        echo "Downloading cmake $CMAKE3_VERSION..."
+        TGZ="cmake-${CMAKE3_VERSION}-macos-universal.tar.gz"
+        URL="https://github.com/Kitware/CMake/releases/download/v${CMAKE3_VERSION}/${TGZ}"
+        curl -fsSL "$URL" | tar -xz -C "$ROOT"
+        mv "$ROOT/cmake-${CMAKE3_VERSION}-macos-universal" "$CMAKE3_DIR"
+        echo "cmake $CMAKE3_VERSION downloaded to $CMAKE3_DIR"
     fi
+    CMAKE_BIN="$CMAKE3_BIN"
 fi
 echo "Using cmake: $CMAKE_BIN ($("$CMAKE_BIN" --version | head -1))"
 
