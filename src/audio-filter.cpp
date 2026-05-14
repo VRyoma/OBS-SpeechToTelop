@@ -121,7 +121,7 @@ static struct obs_audio_data* filter_audio(void* data, struct obs_audio_data* au
 
     auto resampled = d->resampler->process(interleaved.data(), audio->frames);
     for (float s : resampled)
-        d->pipeline.pcm_ring.push(s);
+        d->pipeline.pcm_ring->push(s);
 
     return audio;
 }

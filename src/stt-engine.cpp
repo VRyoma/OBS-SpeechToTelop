@@ -26,7 +26,7 @@ void SttEngine::run() {
     while (running_) {
         // Drain ring buffer
         float s;
-        while (pipeline_->pcm_ring.pop(s))
+        while (pipeline_->pcm_ring->pop(s))
             accum.push_back(s);
 
         if (accum.size() >= chunk_samples) {

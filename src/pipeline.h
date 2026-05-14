@@ -1,4 +1,5 @@
 #pragma once
+#include <memory>
 #include <mutex>
 #include <string>
 #include "ring-buffer.h"
@@ -8,9 +9,13 @@
 constexpr size_t kPcmRingSize = 320001;  // N-1 usable = 320000
 
 struct Pipeline {
-    RingBuffer<float, kPcmRingSize> pcm_ring;
+    // Heap-allocated: 320001 * 4 = ~1.28 MB would overflow the Windows
+    // default 1 MB stack when Pipeline is declared as a local variable.
+    std::unique_ptr<RingBuffer<float, kPcmRingSize>> pcm_ring;
 
     std::mutex text_mutex;
-    std::string latest_text;  // updated by STT thread
+    std::string latest_text;
     bool text_updated = false;
+
+    Pipeline();
 };
