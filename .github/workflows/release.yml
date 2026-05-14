@@ -145,9 +145,10 @@ jobs:
           fetch-depth: 1
           submodules: false
 
-      # Patch obs-studio: disable deps that require external libs we don't have.
-      # media-playback needs FFmpeg; file-updater needs curl (provided by vcpkg).
-      # libobs itself does not depend on media-playback, so it's safe to skip.
+      # Patch obs-studio for minimal Windows build:
+      # - Disable media-playback (needs FFmpeg separately)
+      # - Restrict Windows buildspec to prebuilt deps only (skip Qt6 ~800MB and CEF ~2GB)
+      #   obs-deps prebuilt already contains FFmpeg, jansson, zlib — all libobs needs.
       - name: Patch obs-studio deps (Windows)
         if: runner.os == 'Windows'
         run: |
@@ -156,7 +157,15 @@ jobs:
             (Get-Content $f) |
               ForEach-Object { $_ -replace 'add_subdirectory\(media-playback\)', '# add_subdirectory(media-playback)' } |
               Set-Content $f
-            Write-Host "Patched: disabled media-playback subdirectory"
+            Write-Host "Patched: disabled media-playback"
+          }
+          # Only download prebuilt obs-deps (not Qt6 or CEF — saves ~2.5 GB)
+          $bs = "obs-studio/cmake/windows/buildspec.cmake"
+          if (Test-Path $bs) {
+            (Get-Content $bs) |
+              ForEach-Object { $_ -replace 'set\(dependencies_list prebuilt qt6 cef\)', 'set(dependencies_list prebuilt)' } |
+              Set-Content $bs
+            Write-Host "Patched: Windows buildspec to prebuilt-only"
           }
         shell: pwsh
 
@@ -164,7 +173,7 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           $vcpkg = if ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } else { $env:VCPKG_ROOT }
-          & "$vcpkg\vcpkg.exe" install curl:x64-windows gtest:x64-windows jansson:x64-windows
+          & "$vcpkg\vcpkg.exe" install curl:x64-windows gtest:x64-windows
         shell: pwsh
 
       - name: Cache OBS build (Windows)
@@ -175,16 +184,18 @@ jobs:
           path: |
             obs-build
             obs-install
-          key: obs-${{ env.OBS_VERSION }}-windows-libobs-v3
+            obs-studio/.deps
+          key: obs-${{ env.OBS_VERSION }}-windows-libobs-v4
 
       - name: Build libobs (Windows)
         if: runner.os == 'Windows' && steps.obs-cache-win.outputs.cache-hit != 'true'
         run: |
-          $vcpkg = if ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } else { $env:VCPKG_ROOT }
+          # OBS_CMAKE_VERSION=3.0.0 activates the new cmake path that auto-downloads
+          # obs-deps (prebuilt only, after buildspec patch) via FetchContent.
+          # obs-deps contains FFmpeg, jansson, zlib — no vcpkg needed for OBS build.
           cmake -B obs-build -S obs-studio `
             -G "Visual Studio 17 2022" -A x64 `
-            -DCMAKE_TOOLCHAIN_FILE="${vcpkg}\scripts\buildsystems\vcpkg.cmake" `
-            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DOBS_CMAKE_VERSION=3.0.0 `
             -DENABLE_BROWSER=OFF `
             -DENABLE_WEBSOCKET=OFF `
             -DENABLE_UI=OFF `
