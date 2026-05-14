@@ -27,6 +27,7 @@ public:
         std::string model_path;
         std::string language = "ja";
         int n_threads = 4;
+        std::string initial_prompt;
     };
 
     explicit SttWhisper(Config cfg);

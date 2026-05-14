@@ -57,6 +57,8 @@ static void* filter_create(obs_data_t* settings, obs_source_t* source) {
     std::string lang_s       = lang_str    ? lang_str     : "ja";
     std::string api_key_s    = obs_data_get_string(settings, "api_key")
                                ? obs_data_get_string(settings, "api_key") : "";
+    const char* prompt_str   = obs_data_get_string(settings, "initial_prompt");
+    std::string prompt_s     = prompt_str ? prompt_str : "";
 
     // Resolve paths on main thread (obs_current_module() is thread-local).
     std::string resolved_model_path = custom_path_s.empty()
@@ -78,7 +80,7 @@ static void* filter_create(obs_data_t* settings, obs_source_t* source) {
             return std::make_unique<SttCloud>(std::move(cfg));
         };
     } else {
-        factory = [resolved_model_path, resolved_data_dir, model_name_s, lang_s, pipeline_ptr]()
+        factory = [resolved_model_path, resolved_data_dir, model_name_s, lang_s, prompt_s, pipeline_ptr]()
                   -> std::unique_ptr<ISttBackend> {
             std::string model_path = resolved_model_path;
 
@@ -112,6 +114,7 @@ static void* filter_create(obs_data_t* settings, obs_source_t* source) {
             SttWhisper::Config cfg;
             cfg.model_path = model_path;
             cfg.language   = lang_s;
+            cfg.initial_prompt = prompt_s;
             return std::make_unique<SttWhisper>(std::move(cfg));
         };
     }
@@ -169,6 +172,7 @@ static void get_defaults(obs_data_t* settings) {
     obs_data_set_default_string(settings, "display_mode", "sentence");
     obs_data_set_default_int(settings, "buffer_timeout", 5);
     obs_data_set_default_string(settings, "api_key", "");
+    obs_data_set_default_string(settings, "initial_prompt", "");
 }
 
 static obs_properties_t* get_properties(void*) {
@@ -208,6 +212,16 @@ static obs_properties_t* get_properties(void*) {
 
     obs_properties_add_text(props, "api_key",
         obs_module_text("STT.APIKey"), OBS_TEXT_PASSWORD);
+
+    obs_property_t* prompt = obs_properties_add_list(props, "initial_prompt",
+        obs_module_text("STT.Situation"), OBS_COMBO_TYPE_EDITABLE, OBS_COMBO_FORMAT_STRING);
+    obs_property_list_add_string(prompt, obs_module_text("STT.Situation.None"),     "");
+    obs_property_list_add_string(prompt, obs_module_text("STT.Situation.Gaming"),   "日本語のゲーム実況配信です。");
+    obs_property_list_add_string(prompt, obs_module_text("STT.Situation.Chat"),     "日本語の雑談配信です。");
+    obs_property_list_add_string(prompt, obs_module_text("STT.Situation.Singing"),  "日本語の歌配信です。");
+    obs_property_list_add_string(prompt, obs_module_text("STT.Situation.Cooking"),  "日本語の料理配信です。");
+    obs_property_list_add_string(prompt, obs_module_text("STT.Situation.Teaching"), "日本語の解説配信です。");
+    obs_property_list_add_string(prompt, obs_module_text("STT.Situation.English"),  "This is an English-language stream.");
 
     return props;
 }

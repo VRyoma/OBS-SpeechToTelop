@@ -51,6 +51,8 @@ SttResult SttWhisper::transcribe(const float* samples, size_t num_samples) {
     params.translate      = false;
     params.no_speech_thold = 1.0f;  // disable VAD filter
     params.logprob_thold   = -1.f; // most permissive logprob
+    if (!cfg_.initial_prompt.empty())
+        params.initial_prompt = cfg_.initial_prompt.c_str();
 
     blog(LOG_INFO, "[SpeechToTelop] whisper_full: %zu samples (%.1fs)",
          num_samples, static_cast<float>(num_samples) / 16000.f);
