@@ -10,6 +10,8 @@ permissions:
 
 env:
   OBS_VERSION: '30.1.2'
+  # obs-deps version matching obs-studio 30.1.2 (see buildspec.json in obs-studio repo)
+  OBS_DEPS_VERSION: '2024-01-25'
 
 jobs:
   # ─── Build binaries ─────────────────────────────────────────────────────────
@@ -35,7 +37,6 @@ jobs:
         with:
           submodules: recursive
 
-      # ── FetchContent cache (whisper.cpp — both platforms) ──────────────────
       - name: Cache whisper.cpp
         uses: actions/cache@v4
         with:
@@ -43,33 +44,74 @@ jobs:
           key: whisper-v1.7.3-${{ runner.os }}
 
       # ═══════════════════════════════════════════════════════════════════════
-      # macOS
+      # macOS — build libobs from source with pre-installed cmake (3.x)
+      # Note: obs-studio 30.1.2 is incompatible with cmake 4.x; do NOT
+      #       install cmake via brew before the obs-build step.
       # ═══════════════════════════════════════════════════════════════════════
-      - name: Install OBS + deps (macOS)
+      - name: Install macOS deps
         if: runner.os == 'macOS'
+        run: brew install googletest curl
+
+      - name: Checkout OBS Studio source (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/checkout@v4
+        with:
+          repository: obsproject/obs-studio
+          ref: ${{ env.OBS_VERSION }}
+          path: obs-studio
+          fetch-depth: 1
+          submodules: false
+
+      - name: Cache OBS build (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        id: obs-cache-mac
+        with:
+          path: |
+            obs-build
+            obs-install
+          key: obs-${{ env.OBS_VERSION }}-macos-libobs
+
+      - name: Build libobs (macOS)
+        if: runner.os == 'macOS' && steps.obs-cache-mac.outputs.cache-hit != 'true'
         run: |
-          # Use pre-installed cmake (3.x) — obs-studio 30.1.2 is not compatible with cmake 4.x
-          brew install googletest curl
+          cmake -B obs-build -S obs-studio \
+            -G Xcode \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DENABLE_BROWSER=OFF \
+            -DENABLE_WEBSOCKET=OFF \
+            -DENABLE_UI=OFF \
+            -DENABLE_SCRIPTING=OFF \
+            -DENABLE_VLC=OFF \
+            -DENABLE_PLUGINS=OFF \
+            -DENABLE_FRONTEND_API=OFF \
+            -DENABLE_HEVC=OFF \
+            -DENABLE_VIRTUALCAM=OFF
+          cmake --build obs-build --config Release --target libobs --parallel
+          cmake --install obs-build --config Release --prefix obs-install
 
       - name: Locate libobs cmake config (macOS)
         if: runner.os == 'macOS'
         run: |
-          OBS_PREFIX="$(brew --prefix obs-studio)"
-          LIBOBS_DIR=$(find "$OBS_PREFIX" -name "libobsConfig.cmake" 2>/dev/null \
-                         | head -1 | xargs -I{} dirname {} || echo "")
-          echo "LIBOBS_DIR=$LIBOBS_DIR" >> "$GITHUB_ENV"
-          echo "GTEST_ROOT=$(brew --prefix googletest)" >> "$GITHUB_ENV"
+          cfg=$(find obs-install obs-build -name "libobsConfig.cmake" 2>/dev/null | head -1)
+          if [ -n "$cfg" ]; then
+            echo "LIBOBS_DIR=$(dirname "$cfg")" >> "$GITHUB_ENV"
+          else
+            echo "::error::libobsConfig.cmake not found"
+            exit 1
+          fi
 
-      - name: Configure (macOS)
+      - name: Configure plugin (macOS)
         if: runner.os == 'macOS'
         run: |
           cmake -B build \
-            -DCMAKE_BUILD_TYPE=Release \
+            -G Xcode \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            ${LIBOBS_DIR:+-Dlibobs_DIR="$LIBOBS_DIR"} \
-            -DGTEST_ROOT="$GTEST_ROOT"
+            -DCMAKE_BUILD_TYPE=Release \
+            -Dlibobs_DIR="$LIBOBS_DIR" \
+            -DGTEST_ROOT=$(brew --prefix googletest)
 
-      - name: Build (macOS)
+      - name: Build plugin (macOS)
         if: runner.os == 'macOS'
         run: cmake --build build --config Release --parallel
 
@@ -79,12 +121,12 @@ jobs:
           VERSION="${GITHUB_REF_NAME}"
           PKG="${{ matrix.artifact }}-${VERSION}"
           mkdir -p "${PKG}/bin" "${PKG}/data/locale"
-          cp build/SpeechToTelop.dylib "${PKG}/bin/"
-          cp data/locale/en-US.ini     "${PKG}/data/locale/"
+          cp build/Release/SpeechToTelop.dylib "${PKG}/bin/"
+          cp data/locale/en-US.ini "${PKG}/data/locale/"
           zip -r "${PKG}.zip" "${PKG}"
 
       # ═══════════════════════════════════════════════════════════════════════
-      # Windows — build libobs from source then build plugin against it
+      # Windows — obs-deps + build libobs from source
       # ═══════════════════════════════════════════════════════════════════════
       - name: Checkout OBS Studio source (Windows)
         if: runner.os == 'Windows'
@@ -94,23 +136,44 @@ jobs:
           ref: ${{ env.OBS_VERSION }}
           path: obs-studio
           fetch-depth: 1
-          submodules: false   # submodules not needed for libobs-only build
+          submodules: false
+
+      - name: Cache obs-deps (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        id: obs-deps-cache
+        with:
+          path: obs-deps
+          key: obs-deps-${{ env.OBS_DEPS_VERSION }}-x64-windows
+
+      - name: Download obs-deps (Windows)
+        if: runner.os == 'Windows' && steps.obs-deps-cache.outputs.cache-hit != 'true'
+        run: |
+          $ver = "${{ env.OBS_DEPS_VERSION }}"
+          $url = "https://github.com/obsproject/obs-deps/releases/download/${ver}/windows-deps-${ver}-x64.zip"
+          Invoke-WebRequest -Uri $url -OutFile obs-deps.zip
+          Expand-Archive -Path obs-deps.zip -DestinationPath "$PWD"
+          $dir = (Get-ChildItem -Filter "windows-deps-*" -Directory | Select-Object -First 1).FullName
+          Move-Item $dir obs-deps
+        shell: pwsh
 
       - name: Cache OBS build (Windows)
         if: runner.os == 'Windows'
         uses: actions/cache@v4
-        id: obs-cache
+        id: obs-cache-win
         with:
           path: |
             obs-build
             obs-install
-          key: obs-${{ env.OBS_VERSION }}-windows-libobs
+          key: obs-${{ env.OBS_VERSION }}-deps-${{ env.OBS_DEPS_VERSION }}-windows-libobs
 
       - name: Build libobs (Windows)
-        if: runner.os == 'Windows' && steps.obs-cache.outputs.cache-hit != 'true'
+        if: runner.os == 'Windows' && steps.obs-cache-win.outputs.cache-hit != 'true'
         run: |
+          $deps = "$PWD\obs-deps"
           cmake -B obs-build -S obs-studio `
             -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_PREFIX_PATH="${deps};${deps}\bin" `
             -DENABLE_BROWSER=OFF `
             -DENABLE_WEBSOCKET=OFF `
             -DENABLE_UI=OFF `
@@ -127,35 +190,33 @@ jobs:
           cmake --install obs-build --config Release --prefix obs-install
         shell: pwsh
 
-      - name: Install curl + GTest (Windows)
+      - name: Install GTest (Windows)
         if: runner.os == 'Windows'
-        run: vcpkg install curl:x64-windows gtest:x64-windows
+        run: vcpkg install gtest:x64-windows
         shell: pwsh
 
       - name: Locate libobs cmake config (Windows)
         if: runner.os == 'Windows'
         run: |
-          $cfg = Get-ChildItem -Path obs-install -Recurse -Filter libobsConfig.cmake `
-                   -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $cfg) {
-            # Fallback: search build tree
-            $cfg = Get-ChildItem -Path obs-build -Recurse -Filter libobsConfig.cmake `
-                     -ErrorAction SilentlyContinue | Select-Object -First 1
-          }
+          $cfg = Get-ChildItem -Path obs-install,obs-build -Recurse `
+                   -Filter libobsConfig.cmake -ErrorAction SilentlyContinue |
+                 Select-Object -First 1
           if ($cfg) {
             echo "LIBOBS_DIR=$($cfg.DirectoryName)" >> $env:GITHUB_ENV
-            Write-Host "Found libobsConfig.cmake at $($cfg.DirectoryName)"
           } else {
-            Write-Error "Could not locate libobsConfig.cmake"
+            Write-Error "libobsConfig.cmake not found"
+            exit 1
           }
         shell: pwsh
 
       - name: Configure plugin (Windows)
         if: runner.os == 'Windows'
         run: |
+          $deps = "$PWD\obs-deps"
           cmake -B build `
             -G "Visual Studio 17 2022" -A x64 `
             -Dlibobs_DIR="$env:LIBOBS_DIR" `
+            -DCMAKE_PREFIX_PATH="${deps};${deps}\bin" `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows
         shell: pwsh
@@ -177,7 +238,7 @@ jobs:
           Compress-Archive -Path $pkg -DestinationPath "${pkg}.zip"
         shell: pwsh
 
-      # ── Upload artifact to share with release job ──────────────────────────
+      # ── Upload artifact ────────────────────────────────────────────────────
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -203,7 +264,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ github.ref_name }}
         run: |
-          # Determine if pre-release (any tag containing a hyphen, e.g. v1.0.0-beta.1)
           PRERELEASE=""
           [[ "$VERSION" == *-* ]] && PRERELEASE="--prerelease"
 
