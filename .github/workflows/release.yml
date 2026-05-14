@@ -145,6 +145,21 @@ jobs:
           fetch-depth: 1
           submodules: false
 
+      # Patch obs-studio: disable deps that require external libs we don't have.
+      # media-playback needs FFmpeg; file-updater needs curl (provided by vcpkg).
+      # libobs itself does not depend on media-playback, so it's safe to skip.
+      - name: Patch obs-studio deps (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $f = "obs-studio/deps/CMakeLists.txt"
+          if (Test-Path $f) {
+            (Get-Content $f) |
+              ForEach-Object { $_ -replace 'add_subdirectory\(media-playback\)', '# add_subdirectory(media-playback)' } |
+              Set-Content $f
+            Write-Host "Patched: disabled media-playback subdirectory"
+          }
+        shell: pwsh
+
       - name: Install vcpkg deps (Windows)
         if: runner.os == 'Windows'
         run: |
