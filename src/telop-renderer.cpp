@@ -1,5 +1,6 @@
 #include "telop-renderer.h"
 #include <graphics/graphics.h>
+#include <obs-module.h>
 #include <vector>
 #include <cstring>
 
@@ -25,36 +26,6 @@ static std::vector<uint8_t> render_text_to_rgba(
     CTFontRef font = CTFontCreateWithName(font_name_str, style.font_size, nullptr);
     CFRelease(font_name_str);
 
-    // Build attributed string
-    CFMutableAttributedStringRef attr = CFAttributedStringCreateMutable(kCFAllocatorDefault, 0);
-    CFAttributedStringReplaceString(attr, CFRangeMake(0, 0), cf_text);
-    CFRange full = CFRangeMake(0, CFStringGetLength(cf_text));
-    CFAttributedStringSetAttribute(attr, full, kCTFontAttributeName, font);
-
-    CTLineRef line = CTLineCreateWithAttributedString(attr);
-    CGRect bounds = CTLineGetImageBounds(line, nullptr);
-
-    float pad = style.outline_thickness * 2.f + 4.f;
-    if (style.shadow) {
-        pad += std::max(std::abs(style.shadow_offset_x), std::abs(style.shadow_offset_y)) + 2.f;
-    }
-
-    out_w = static_cast<uint32_t>(std::ceil(bounds.size.width  + pad * 2.f));
-    out_h = static_cast<uint32_t>(std::ceil(bounds.size.height + pad * 2.f));
-    if (out_w == 0 || out_h == 0) {
-        CFRelease(line); CFRelease(attr); CFRelease(font); CFRelease(cf_text);
-        return {};
-    }
-
-    std::vector<uint8_t> pixels(out_w * out_h * 4, 0);
-    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-    CGContextRef ctx = CGBitmapContextCreate(pixels.data(), out_w, out_h, 8,
-        out_w * 4, cs, kCGImageAlphaPremultipliedLast);
-    CGColorSpaceRelease(cs);
-
-    float bx = pad - static_cast<float>(bounds.origin.x);
-    float by = pad - static_cast<float>(bounds.origin.y);
-
     auto argb_color = [](uint32_t argb) -> CGColorRef {
         float a = ((argb >> 24) & 0xFF) / 255.f;
         float r = ((argb >> 16) & 0xFF) / 255.f;
@@ -67,66 +38,94 @@ static std::vector<uint8_t> render_text_to_rgba(
         return c;
     };
 
-    // Shadow pass
+    // Build attributed string — set foreground color so CTLineDraw uses the right color
+    CFMutableAttributedStringRef attr = CFAttributedStringCreateMutable(kCFAllocatorDefault, 0);
+    CFAttributedStringReplaceString(attr, CFRangeMake(0, 0), cf_text);
+    CFRange full = CFRangeMake(0, CFStringGetLength(cf_text));
+    CFAttributedStringSetAttribute(attr, full, kCTFontAttributeName, font);
+
+    // Measure bounds using a temporary line (no color needed for measurement)
+    CTLineRef measure_line = CTLineCreateWithAttributedString(attr);
+    CGRect bounds = CTLineGetImageBounds(measure_line, nullptr);
+    CFRelease(measure_line);
+
+    float pad = style.outline_thickness * 2.f + 4.f;
     if (style.shadow) {
+        pad += std::max(std::abs(style.shadow_offset_x), std::abs(style.shadow_offset_y)) + 2.f;
+    }
+
+    out_w = static_cast<uint32_t>(std::ceil(bounds.size.width  + pad * 2.f));
+    out_h = static_cast<uint32_t>(std::ceil(bounds.size.height + pad * 2.f));
+    if (out_w == 0 || out_h == 0) {
+        CFRelease(attr); CFRelease(font); CFRelease(cf_text);
+        return {};
+    }
+
+    std::vector<uint8_t> pixels(out_w * out_h * 4, 0);
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGContextRef ctx = CGBitmapContextCreate(pixels.data(), out_w, out_h, 8,
+        out_w * 4, cs, kCGImageAlphaPremultipliedLast);
+    CGColorSpaceRelease(cs);
+
+    float bx = pad - static_cast<float>(bounds.origin.x);
+    float by = pad - static_cast<float>(bounds.origin.y);
+
+    // Helper: create a CTLine with a specific foreground color set via attributed string
+    auto make_line_with_color = [&](uint32_t argb_col) -> CTLineRef {
+        CGColorRef c = argb_color(argb_col);
+        CFAttributedStringSetAttribute(attr, full, kCTForegroundColorAttributeName, c);
+        CGColorRelease(c);
+        return CTLineCreateWithAttributedString(attr);
+    };
+
+    // Background (座布団) pass
+    if (style.background) {
+        CGColorRef bgc = argb_color(style.background_color);
+        CGContextSetFillColorWithColor(ctx, bgc);
+        CGContextFillRect(ctx, CGRectMake(0, 0, out_w, out_h));
+        CGColorRelease(bgc);
+    }
+
+    // Shadow pass — draw with semi-transparent black foreground color
+    if (style.shadow) {
+        CTLineRef shadow_line = make_line_with_color(0xAA000000);
         CGContextSaveGState(ctx);
         CGContextSetTextPosition(ctx, bx + style.shadow_offset_x, by - style.shadow_offset_y);
-        CGColorRef sc = argb_color(0xAA000000);
-        CGContextSetFillColorWithColor(ctx, sc);
         CGContextSetTextDrawingMode(ctx, kCGTextFill);
-        CTLineDraw(line, ctx);
-        CGColorRelease(sc);
+        CTLineDraw(shadow_line, ctx);
         CGContextRestoreGState(ctx);
+        CFRelease(shadow_line);
     }
 
-    // Outline pass
+    // Outline pass — use stroke mode; stroke color set via CGContext
     if (style.outline) {
+        CTLineRef outline_line = make_line_with_color(style.outline_color);
+        CGColorRef oc = argb_color(style.outline_color);
         CGContextSaveGState(ctx);
         CGContextSetTextPosition(ctx, bx, by);
-        CGColorRef oc = argb_color(style.outline_color);
-        CGContextSetFillColorWithColor(ctx, oc);
         CGContextSetStrokeColorWithColor(ctx, oc);
         CGContextSetLineWidth(ctx, style.outline_thickness * 2.f);
-        CGContextSetTextDrawingMode(ctx, kCGTextFillStroke);
-        CTLineDraw(line, ctx);
+        CGContextSetLineJoin(ctx, kCGLineJoinRound);
+        CGContextSetLineCap(ctx, kCGLineCapRound);
+        CGContextSetTextDrawingMode(ctx, kCGTextStroke);
+        CTLineDraw(outline_line, ctx);
         CGColorRelease(oc);
         CGContextRestoreGState(ctx);
+        CFRelease(outline_line);
     }
 
-    // Body pass
-    CGContextSaveGState(ctx);
-    CGContextSetTextPosition(ctx, bx, by);
-    CGContextSetTextDrawingMode(ctx, kCGTextFill);
-    if (!style.per_char_color) {
-        CGColorRef wc = argb_color(0xFFFFFFFF);
-        CGContextSetFillColorWithColor(ctx, wc);
-        CTLineDraw(line, ctx);
-        CGColorRelease(wc);
-    } else {
-        CFIndex n_chars = CFStringGetLength(cf_text);
-        for (CFIndex i = 0; i < n_chars; ++i) {
-            uint32_t col = style.palette[i % style.palette.size()];
-            CGFloat x_off = CTLineGetOffsetForStringIndex(line, i, nullptr);
-            CFStringRef char_str = CFStringCreateWithSubstring(
-                kCFAllocatorDefault, cf_text, CFRangeMake(i, 1));
-            CFMutableAttributedStringRef char_attr = CFAttributedStringCreateMutable(kCFAllocatorDefault, 0);
-            CFAttributedStringReplaceString(char_attr, CFRangeMake(0, 0), char_str);
-            CFAttributedStringSetAttribute(char_attr, CFRangeMake(0, 1), kCTFontAttributeName, font);
-            CTLineRef char_line = CTLineCreateWithAttributedString(char_attr);
-            CGContextSetTextPosition(ctx, bx + x_off, by);
-            CGColorRef cc = argb_color(col);
-            CGContextSetFillColorWithColor(ctx, cc);
-            CTLineDraw(char_line, ctx);
-            CGColorRelease(cc);
-            CFRelease(char_line);
-            CFRelease(char_attr);
-            CFRelease(char_str);
-        }
+    // Body pass — foreground color set via kCTForegroundColorAttributeName
+    {
+        CTLineRef body_line = make_line_with_color(style.text_color);
+        CGContextSaveGState(ctx);
+        CGContextSetTextPosition(ctx, bx, by);
+        CGContextSetTextDrawingMode(ctx, kCGTextFill);
+        CTLineDraw(body_line, ctx);
+        CGContextRestoreGState(ctx);
+        CFRelease(body_line);
     }
-    CGContextRestoreGState(ctx);
 
     CGContextRelease(ctx);
-    CFRelease(line);
     CFRelease(attr);
     CFRelease(font);
     CFRelease(cf_text);
@@ -174,7 +173,10 @@ static std::vector<uint8_t> render_text_to_rgba(
 
     Gdiplus::Bitmap bmp(out_w, out_h, PixelFormat32bppARGB);
     Gdiplus::Graphics* g = Gdiplus::Graphics::FromImage(&bmp);
-    g->Clear(Gdiplus::Color(0, 0, 0, 0));
+    if (style.background)
+        g->Clear(argb_gdip(style.background_color));
+    else
+        g->Clear(Gdiplus::Color(0, 0, 0, 0));
     g->SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAlias);
 
     float pad = style.outline_thickness * 2.f + 4.f;
@@ -203,7 +205,7 @@ static std::vector<uint8_t> render_text_to_rgba(
             g->DrawString(wtext.c_str(), -1, &font, or_, nullptr, &ob);
         }
     }
-    Gdiplus::SolidBrush body(Gdiplus::Color(255, 255, 255, 255));
+    Gdiplus::SolidBrush body(argb_gdip(style.text_color));
     g->DrawString(wtext.c_str(), -1, &font, rect, nullptr, &body);
     delete g;
 
@@ -253,32 +255,48 @@ void TelopRenderer::update_text(const std::string& text) {
 
 void TelopRenderer::rebuild_texture() {
     uint32_t w = 0, h = 0;
-    auto pixels = render_text_to_rgba(current_text_, style_, w, h);
-    if (w == 0 || h == 0 || pixels.empty()) {
+    base_pixels_ = render_text_to_rgba(current_text_, style_, w, h);
+    if (w == 0 || h == 0 || base_pixels_.empty()) {
         if (texture_) { gs_texture_destroy(texture_); texture_ = nullptr; }
         tex_w_ = tex_h_ = 0;
+        base_pixels_.clear();
         return;
     }
-
-    if (texture_) gs_texture_destroy(texture_);
+    if (texture_) { gs_texture_destroy(texture_); texture_ = nullptr; }
     texture_ = gs_texture_create(w, h, GS_RGBA, 1, nullptr, GS_DYNAMIC);
     if (texture_) {
-        gs_texture_set_image(texture_, pixels.data(), w * 4, false);
         tex_w_ = w;
         tex_h_ = h;
+        uploaded_alpha_ = -1.f;  // force re-upload on next render call
+    }
+}
+
+void TelopRenderer::upload_with_alpha(float alpha) {
+    if (!texture_ || base_pixels_.empty()) return;
+    if (std::abs(alpha - uploaded_alpha_) < 0.01f) return;
+    uploaded_alpha_ = alpha;
+
+    if (alpha >= 1.f) {
+        gs_texture_set_image(texture_, base_pixels_.data(), tex_w_ * 4, false);
+    } else {
+        std::vector<uint8_t> mod(base_pixels_.size());
+        for (size_t i = 0; i < base_pixels_.size(); ++i)
+            mod[i] = static_cast<uint8_t>(base_pixels_[i] * alpha);
+        gs_texture_set_image(texture_, mod.data(), tex_w_ * 4, false);
     }
 }
 
 void TelopRenderer::render(float x, float y, float alpha) {
     if (!texture_ || alpha <= 0.f) return;
 
-    gs_effect_t* effect = obs_get_base_effect(OBS_EFFECT_PREMULTIPLIED_ALPHA);
-    gs_effect_set_texture(gs_effect_get_param_by_name(effect, "image"), texture_);
+    upload_with_alpha(alpha);
 
     gs_matrix_push();
     gs_matrix_translate3f(x, y, 0.f);
 
+    gs_effect_t* effect = obs_get_base_effect(OBS_EFFECT_PREMULTIPLIED_ALPHA);
     while (gs_effect_loop(effect, "Draw")) {
+        gs_effect_set_texture(gs_effect_get_param_by_name(effect, "image"), texture_);
         gs_draw_sprite(texture_, 0, tex_w_, tex_h_);
     }
 

@@ -1,9 +1,10 @@
 #include "stt-engine.h"
+#include <obs-module.h>
 #include <cmath>
 #include <chrono>
 
-SttEngine::SttEngine(Pipeline* pipeline, std::unique_ptr<ISttBackend> backend, Config cfg)
-    : pipeline_(pipeline), backend_(std::move(backend)), cfg_(cfg),
+SttEngine::SttEngine(Pipeline* pipeline, BackendFactory factory, Config cfg)
+    : pipeline_(pipeline), factory_(std::move(factory)), cfg_(cfg),
       text_buf_(cfg.text_timeout_ms) {}
 
 SttEngine::~SttEngine() { stop(); }
@@ -18,8 +19,32 @@ void SttEngine::stop() {
     if (thread_.joinable()) thread_.join();
 }
 
+void SttEngine::set_status(const std::string& msg) {
+    std::lock_guard<std::mutex> lock(pipeline_->text_mutex);
+    pipeline_->latest_text = msg;
+    pipeline_->text_updated = true;
+}
+
 void SttEngine::run() {
-    const size_t chunk_samples = static_cast<size_t>(16000.0 * cfg_.chunk_ms / 1000.0);
+    blog(LOG_INFO, "[SpeechToTelop] engine thread started");
+    try {
+        set_status("初期化中...");
+        blog(LOG_INFO, "[SpeechToTelop] loading backend...");
+        backend_ = factory_();
+        blog(LOG_INFO, "[SpeechToTelop] backend ready, starting transcription");
+    } catch (const std::exception& e) {
+        blog(LOG_ERROR, "[SpeechToTelop] backend init failed: %s", e.what());
+        set_status(std::string("エラー: ") + e.what());
+        return;
+    } catch (...) {
+        blog(LOG_ERROR, "[SpeechToTelop] backend init failed (unknown)");
+        set_status("エラー: バックエンドの初期化に失敗しました");
+        return;
+    }
+
+    // Whisper needs at least 3 seconds for reliable output; clamp cfg_ to a minimum.
+    const int effective_chunk_ms = std::max(cfg_.chunk_ms, 3000);
+    const size_t chunk_samples = static_cast<size_t>(16000.0 * effective_chunk_ms / 1000.0);
     std::vector<float> accum;
     accum.reserve(chunk_samples * 2);
 
@@ -30,28 +55,23 @@ void SttEngine::run() {
             accum.push_back(s);
 
         if (accum.size() >= chunk_samples) {
-            if (!is_silence(accum.data(), chunk_samples)) {
+            float rms = 0.f;
+            for (size_t i = 0; i < chunk_samples; ++i) rms += accum[i] * accum[i];
+            rms = std::sqrt(rms / static_cast<float>(chunk_samples));
+            blog(LOG_INFO, "[SpeechToTelop] chunk rms=%.4f threshold=%.4f silence=%s",
+                 rms, cfg_.silence_threshold, rms < cfg_.silence_threshold ? "YES" : "NO");
+            if (rms >= cfg_.silence_threshold) {
                 SttResult result = backend_->transcribe(accum.data(), chunk_samples);
+                blog(LOG_INFO, "[SpeechToTelop] result: '%s'", result.text.c_str());
                 if (!result.text.empty()) {
-                    text_buf_.push(result.text);
-                    std::string sentence = text_buf_.try_pop();
-                    if (!sentence.empty()) {
-                        std::lock_guard<std::mutex> lock(pipeline_->text_mutex);
-                        pipeline_->latest_text = sentence;
-                        pipeline_->text_updated = true;
-                    }
+                    std::lock_guard<std::mutex> lock(pipeline_->text_mutex);
+                    pipeline_->latest_text = result.text;
+                    pipeline_->text_updated = true;
                 }
             }
             // Shift consumed samples out
             accum.erase(accum.begin(), accum.begin() + chunk_samples);
         } else {
-            // Check timeout flush even without a full chunk
-            std::string sentence = text_buf_.try_pop();
-            if (!sentence.empty()) {
-                std::lock_guard<std::mutex> lock(pipeline_->text_mutex);
-                pipeline_->latest_text = sentence;
-                pipeline_->text_updated = true;
-            }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }

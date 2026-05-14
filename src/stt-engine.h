@@ -1,5 +1,6 @@
 #pragma once
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -10,13 +11,15 @@
 class SttEngine {
 public:
     struct Config {
-        int chunk_ms   = 3000;            // chunk length for inference
-        float silence_threshold = 0.01f;  // RMS threshold below which we skip inference
-        int text_timeout_ms = 5000;       // TextBuffer flush timeout
-        bool instant_mode = false;        // false = sentence-boundary mode
+        int chunk_ms   = 3000;
+        float silence_threshold = 0.005f;
+        int text_timeout_ms = 5000;
+        bool instant_mode = false;
     };
 
-    SttEngine(Pipeline* pipeline, std::unique_ptr<ISttBackend> backend, Config cfg);
+    using BackendFactory = std::function<std::unique_ptr<ISttBackend>()>;
+
+    SttEngine(Pipeline* pipeline, BackendFactory factory, Config cfg);
     ~SttEngine();
 
     void start();
@@ -25,8 +28,10 @@ public:
 private:
     void run();
     bool is_silence(const float* samples, size_t n) const;
+    void set_status(const std::string& msg);
 
     Pipeline* pipeline_;
+    BackendFactory factory_;
     std::unique_ptr<ISttBackend> backend_;
     Config cfg_;
     std::atomic<bool> running_{false};

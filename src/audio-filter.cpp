@@ -10,8 +10,10 @@
 #include <atomic>
 #include <fstream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
+#include <util/platform.h>
 
 static std::atomic<int> s_instance_counter{0};
 
@@ -30,7 +32,12 @@ static const char* get_name(void*) {
 static void* filter_create(obs_data_t* settings, obs_source_t* source) {
     auto* d = new AudioFilterData();
     d->source = source;
-    d->pipeline_id = "SpeechToTelop-" + std::to_string(s_instance_counter++);
+    // Use filter's own name as pipeline ID — stable across restarts.
+    const char* filter_name = obs_source_get_name(source);
+    d->pipeline_id = (filter_name && *filter_name)
+        ? filter_name
+        : "SpeechToTelop-" + std::to_string(s_instance_counter++);
+    ++s_instance_counter;
 
     struct obs_audio_info ai;
     obs_get_audio_info(&ai);
@@ -38,59 +45,86 @@ static void* filter_create(obs_data_t* settings, obs_source_t* source) {
     uint32_t channels = (ai.speakers == SPEAKERS_MONO) ? 1u : 2u;
     d->resampler = std::make_unique<AudioResampler>(sample_rate, channels);
 
-    const char* backend_str = obs_data_get_string(settings, "stt_backend");
-    std::unique_ptr<ISttBackend> stt_backend;
+    // Capture settings needed by factory (obs_data values are only valid on main thread).
+    const char* backend_str  = obs_data_get_string(settings, "stt_backend");
+    const char* model_name   = obs_data_get_string(settings, "model");
+    const char* custom_path  = obs_data_get_string(settings, "model_path");
+    const char* lang_str     = obs_data_get_string(settings, "language");
 
-    if (backend_str && strcmp(backend_str, "cloud") == 0) {
-        SttCloud::Config cfg;
-        cfg.api_key = obs_data_get_string(settings, "api_key");
-        stt_backend = std::make_unique<SttCloud>(std::move(cfg));
+    std::string backend_s    = backend_str  ? backend_str  : "local";
+    std::string model_name_s = model_name  ? model_name   : "base";
+    std::string custom_path_s = custom_path ? custom_path : "";
+    std::string lang_s       = lang_str    ? lang_str     : "ja";
+    std::string api_key_s    = obs_data_get_string(settings, "api_key")
+                               ? obs_data_get_string(settings, "api_key") : "";
+
+    // Resolve paths on main thread (obs_current_module() is thread-local).
+    std::string resolved_model_path = custom_path_s.empty()
+        ? model_path_for(model_name_s.c_str())
+        : custom_path_s;
+    std::string resolved_data_dir = model_data_dir();
+
+    Pipeline* pipeline_ptr = &d->pipeline;
+
+    blog(LOG_INFO, "[SpeechToTelop] filter_create: backend=%s model_path=%s",
+         backend_s.c_str(), resolved_model_path.c_str());
+
+    // Factory runs on engine thread — no blocking work on the UI thread.
+    SttEngine::BackendFactory factory;
+    if (backend_s == "cloud") {
+        factory = [api_key_s]() -> std::unique_ptr<ISttBackend> {
+            SttCloud::Config cfg;
+            cfg.api_key = api_key_s;
+            return std::make_unique<SttCloud>(std::move(cfg));
+        };
     } else {
-        const char* model_name = obs_data_get_string(settings, "model");
-        std::string model_path;
-        const char* custom_path = obs_data_get_string(settings, "model_path");
-        if (custom_path && *custom_path) {
-            model_path = custom_path;
-        } else {
-            model_path = model_path_for(model_name ? model_name : "base");
+        factory = [resolved_model_path, resolved_data_dir, model_name_s, lang_s, pipeline_ptr]()
+                  -> std::unique_ptr<ISttBackend> {
+            std::string model_path = resolved_model_path;
+
+            // Ensure directory exists (recursive).
+            if (!resolved_data_dir.empty())
+                os_mkdirs(resolved_data_dir.c_str());
+
             if (!std::ifstream(model_path).good()) {
-                {
-                    std::lock_guard<std::mutex> lock(d->pipeline.text_mutex);
-                    d->pipeline.latest_text = "モデルをダウンロード中...";
-                    d->pipeline.text_updated = true;
-                }
+                auto update = [pipeline_ptr](const std::string& msg) {
+                    std::lock_guard<std::mutex> lock(pipeline_ptr->text_mutex);
+                    pipeline_ptr->latest_text = msg;
+                    pipeline_ptr->text_updated = true;
+                };
+                update("モデルをダウンロード中...");
+                bool ok = false;
                 for (size_t i = 0; i < kKnownModelsCount; ++i) {
-                    if (model_name && strcmp(kKnownModels[i].name, model_name) == 0) {
-                        download_file(kKnownModels[i].url, model_path,
-                            [&d](int64_t done, int64_t total) {
-                                std::lock_guard<std::mutex> lock(d->pipeline.text_mutex);
-                                d->pipeline.latest_text =
-                                    "ダウンロード中: " +
+                    if (kKnownModels[i].name == model_name_s) {
+                        ok = download_file(kKnownModels[i].url, model_path,
+                            [&update](int64_t done, int64_t total) {
+                                update("ダウンロード中: " +
                                     std::to_string(done / 1024 / 1024) + "/" +
-                                    std::to_string(total / 1024 / 1024) + " MB";
-                                d->pipeline.text_updated = true;
+                                    std::to_string(total / 1024 / 1024) + " MB");
                             });
                         break;
                     }
                 }
+                if (!ok)
+                    throw std::runtime_error("モデルのダウンロードに失敗しました: " + model_path);
             }
-        }
-        SttWhisper::Config cfg;
-        cfg.model_path = model_path;
-        const char* lang = obs_data_get_string(settings, "language");
-        cfg.language = lang ? lang : "ja";
-        stt_backend = std::make_unique<SttWhisper>(std::move(cfg));
+
+            SttWhisper::Config cfg;
+            cfg.model_path = model_path;
+            cfg.language   = lang_s;
+            return std::make_unique<SttWhisper>(std::move(cfg));
+        };
     }
 
     SttEngine::Config eng_cfg;
     long long speed_val = obs_data_get_int(settings, "speed_accuracy");
-    eng_cfg.chunk_ms = static_cast<int>(speed_val > 0 ? speed_val : 3) * 1000;
+    eng_cfg.chunk_ms = static_cast<int>(speed_val > 0 ? speed_val : 2) * 1000;
     const char* mode = obs_data_get_string(settings, "display_mode");
     eng_cfg.instant_mode = (mode && strcmp(mode, "instant") == 0);
     long long timeout_s = obs_data_get_int(settings, "buffer_timeout");
     eng_cfg.text_timeout_ms = static_cast<int>(timeout_s > 0 ? timeout_s : 5) * 1000;
 
-    d->engine = std::make_unique<SttEngine>(&d->pipeline, std::move(stt_backend), eng_cfg);
+    d->engine = std::make_unique<SttEngine>(&d->pipeline, std::move(factory), eng_cfg);
     d->engine->start();
 
     PipelineRegistry::global().register_pipeline(d->pipeline_id, &d->pipeline);
@@ -130,7 +164,7 @@ static void get_defaults(obs_data_t* settings) {
     obs_data_set_default_string(settings, "stt_backend", "local");
     obs_data_set_default_string(settings, "model", "base");
     obs_data_set_default_string(settings, "model_path", "");
-    obs_data_set_default_int(settings, "speed_accuracy", 3);
+    obs_data_set_default_int(settings, "speed_accuracy", 2);
     obs_data_set_default_string(settings, "language", "ja");
     obs_data_set_default_string(settings, "display_mode", "sentence");
     obs_data_set_default_int(settings, "buffer_timeout", 5);

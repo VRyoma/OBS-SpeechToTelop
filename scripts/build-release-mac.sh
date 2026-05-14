@@ -123,10 +123,25 @@ GTEST_ROOT="$(brew --prefix googletest 2>/dev/null || true)"
 
 "$CMAKE_BIN" --build "$BUILD_DIR" --parallel
 
+DYLIB="$BUILD_DIR/SpeechToTelop.dylib"
+
+# Fix libobs rpath so OBS.app can resolve it at runtime
+install_name_tool \
+    -change "libobs/libobs.framework/Versions/A/libobs" \
+            "@rpath/libobs.framework/Versions/A/libobs" \
+    "$DYLIB" 2>/dev/null || true
+install_name_tool -add_rpath "/Applications/OBS.app/Contents/Frameworks" "$DYLIB" 2>/dev/null || true
+
 echo ""
 echo "Build succeeded!"
-echo "Plugin: $BUILD_DIR/SpeechToTelop.dylib"
-echo ""
-echo "Install to OBS:"
-echo "  mkdir -p ~/Library/Application\\ Support/obs-studio/plugins/SpeechToTelop/bin"
-echo "  cp $BUILD_DIR/SpeechToTelop.dylib ~/Library/Application\\ Support/obs-studio/plugins/SpeechToTelop/bin/"
+echo "Plugin: $DYLIB"
+
+# ── 7. Auto-install into OBS plugin bundle ────────────────────────────────────
+BUNDLE="$HOME/Library/Application Support/obs-studio/plugins/SpeechToTelop.plugin"
+mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources/locale"
+cp "$DYLIB" "$BUNDLE/Contents/MacOS/SpeechToTelop"
+cp "$ROOT/data/locale/en-US.ini" "$BUNDLE/Contents/Resources/locale/"
+if [ -f "$ROOT/data/locale/ja-JP.ini" ]; then
+    cp "$ROOT/data/locale/ja-JP.ini" "$BUNDLE/Contents/Resources/locale/"
+fi
+echo "Installed → $BUNDLE"

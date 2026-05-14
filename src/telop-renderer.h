@@ -14,8 +14,9 @@ struct TelopStyle {
     bool shadow = true;
     float shadow_offset_x = 2.f;
     float shadow_offset_y = 2.f;
-    bool per_char_color = false;
-    std::vector<uint32_t> palette = {0xFFFFFFFF, 0xFFFFFF00, 0xFFFF0000, 0xFF0000FF};
+    uint32_t text_color = 0xFFFFFFFF; // ARGB — white
+    bool background = false;
+    uint32_t background_color = 0x99000000; // ARGB — semi-transparent black
 };
 
 class TelopRenderer {
@@ -34,9 +35,12 @@ public:
 
 private:
     void rebuild_texture();
+    void upload_with_alpha(float alpha);
 
     TelopStyle style_;
     std::string current_text_;
+    std::vector<uint8_t> base_pixels_;  // unmodified RGBA from CoreText/GDI+
     gs_texture_t* texture_ = nullptr;
     uint32_t tex_w_ = 0, tex_h_ = 0;
+    float uploaded_alpha_ = -1.f;       // tracks last uploaded alpha to avoid redundant uploads
 };

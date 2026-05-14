@@ -45,6 +45,7 @@ FetchContent_Declare(
 )
 set(WHISPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(whisper)
 
 # Plugin target
@@ -75,6 +76,9 @@ if(APPLE)
     )
 endif()
 set_target_properties(SpeechToTelop PROPERTIES PREFIX "")
+if(APPLE)
+    set_target_properties(SpeechToTelop PROPERTIES SUFFIX ".dylib")
+endif()
 
 # Install locale data
 install(DIRECTORY data/ DESTINATION "${CMAKE_INSTALL_PREFIX}/data/obs-plugins/SpeechToTelop")
