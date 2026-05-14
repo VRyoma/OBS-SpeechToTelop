@@ -213,11 +213,12 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           $deps = "$PWD\obs-deps"
+          $vcpkg = if ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } else { $env:VCPKG_ROOT }
           cmake -B build `
             -G "Visual Studio 17 2022" -A x64 `
             -Dlibobs_DIR="$env:LIBOBS_DIR" `
             -DCMAKE_PREFIX_PATH="${deps};${deps}\bin" `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DCMAKE_TOOLCHAIN_FILE="${vcpkg}\scripts\buildsystems\vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows
         shell: pwsh
 

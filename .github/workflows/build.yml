@@ -50,8 +50,9 @@ jobs:
       - name: Configure (Windows)
         if: runner.os == 'Windows'
         run: |
+          $vcpkg = if ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } else { $env:VCPKG_ROOT }
           cmake -B build -G "${{ matrix.cmake_generator }}" `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DCMAKE_TOOLCHAIN_FILE="${vcpkg}\scripts\buildsystems\vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows
         shell: pwsh
 
