@@ -47,12 +47,9 @@ jobs:
       # ═══════════════════════════════════════════════════════════════════════
       - name: Install OBS + deps (macOS)
         if: runner.os == 'macOS'
-        env:
-          HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          brew install cmake googletest curl
-          brew tap obsproject/obs-studio 2>/dev/null || true
-          brew install obs-studio
+          # Use pre-installed cmake (3.x) — obs-studio 30.1.2 is not compatible with cmake 4.x
+          brew install googletest curl
 
       - name: Locate libobs cmake config (macOS)
         if: runner.os == 'macOS'
