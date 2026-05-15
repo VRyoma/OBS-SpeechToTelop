@@ -234,11 +234,14 @@ jobs:
           }
         shell: pwsh
 
-      - name: Inspect libobsConfig.cmake (Windows)
+      - name: Inspect libobs cmake files (Windows)
         if: runner.os == 'Windows'
         run: |
-          $cfg = "$env:LIBOBS_DIR\libobsConfig.cmake"
-          if (Test-Path $cfg) { Get-Content $cfg }
+          $dir = $env:LIBOBS_DIR
+          Write-Host "=== libobsConfig.cmake ==="
+          Get-Content "$dir\libobsConfig.cmake" -ErrorAction SilentlyContinue
+          Write-Host "=== libobsTargets.cmake ==="
+          Get-Content "$dir\libobsTargets.cmake" -ErrorAction SilentlyContinue
         shell: pwsh
 
       - name: Configure plugin (Windows)
@@ -250,7 +253,8 @@ jobs:
                     -ErrorAction SilentlyContinue |
                   Select-Object -First 1 -ExpandProperty FullName
           # Findw32-pthreads.cmake stub satisfies find_dependency(w32-pthreads) in libobsConfig.cmake
-          $modules = ("${{ github.workspace }}/cmake/Modules")
+          # github.workspace uses backslashes on Windows — convert to forward slashes for cmake
+          $modules = ("${{ github.workspace }}/cmake/Modules") -replace '\\','/'
           Write-Host "LIBOBS_DIR: $env:LIBOBS_DIR"
           Write-Host "modules:    $modules"
           Write-Host "obs-deps:   $deps"
