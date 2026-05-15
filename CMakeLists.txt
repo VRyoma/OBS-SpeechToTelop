@@ -19,19 +19,21 @@ add_executable(SpeechToTelopTests
 )
 target_include_directories(SpeechToTelopTests PRIVATE src)
 target_link_libraries(SpeechToTelopTests GTest::gtest_main)
-include(GoogleTest)
-gtest_discover_tests(SpeechToTelopTests)
+add_test(NAME SpeechToTelopTests COMMAND SpeechToTelopTests)
 
 # OBS plugin — only built when libobs is available
 find_package(libobs QUIET)
 find_package(CURL QUIET)
 
+message(STATUS "libobs_FOUND=${libobs_FOUND}  libobs_DIR=${libobs_DIR}")
+message(STATUS "CURL_FOUND=${CURL_FOUND}  CURL_VERSION=${CURL_VERSION}")
+
 if(NOT libobs_FOUND)
-    message(STATUS "libobs not found — skipping plugin target (tests still build)")
+    message(WARNING "libobs not found — skipping plugin target (tests still build)")
     return()
 endif()
 if(NOT CURL_FOUND)
-    message(STATUS "CURL not found — skipping plugin target")
+    message(WARNING "CURL not found — skipping plugin target")
     return()
 endif()
 

@@ -243,14 +243,21 @@ jobs:
           # vcpkg installed dir has cmake configs for curl and gtest
           $vcpkgInst = "$vcpkg\installed\x64-windows"
           # obs-deps dir has cmake configs for zlib, jansson, w32-pthreads etc.
-          $deps = Get-ChildItem -Path "obs-studio/.deps" -Directory -Filter "obs-deps-*-x64" |
+          $deps = Get-ChildItem -Path "obs-studio/.deps" -Directory -Filter "obs-deps-*-x64" `
+                    -ErrorAction SilentlyContinue |
                   Select-Object -First 1 -ExpandProperty FullName
           $w32pt = "${{ github.workspace }}\cmake\w32-pthreads"
-          Write-Host "obs-deps: $deps"
-          Write-Host "vcpkg installed: $vcpkgInst"
+          Write-Host "LIBOBS_DIR: $env:LIBOBS_DIR"
+          Write-Host "obs-deps:   $deps"
+          Write-Host "vcpkg inst: $vcpkgInst"
+          # List cmake configs available in obs-deps
+          if ($deps) {
+            Get-ChildItem -Path $deps -Recurse -Filter "*Config.cmake" |
+              Select-Object -ExpandProperty FullName
+          }
           # No vcpkg toolchain — CMAKE_PREFIX_PATH covers both obs-deps and vcpkg installed.
           # Avoids vcpkg interception of find_dependency() calls from libobsConfig.cmake.
-          cmake -B build `
+          cmake -B build --log-level=VERBOSE `
             -G "Visual Studio 17 2022" -A x64 `
             -Dlibobs_DIR="$env:LIBOBS_DIR" `
             -Dw32-pthreads_DIR="$w32pt" `
