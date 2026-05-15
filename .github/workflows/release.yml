@@ -311,6 +311,8 @@ jobs:
         run: |
           PRERELEASE=""
           [[ "$VERSION" == *-* ]] && PRERELEASE="--prerelease"
+          # Delete existing release if present (re-running the same tag)
+          gh release delete "$VERSION" --repo "$GITHUB_REPOSITORY" --yes 2>/dev/null || true
 
           gh release create "$VERSION" *.zip \
             --repo "$GITHUB_REPOSITORY" \
