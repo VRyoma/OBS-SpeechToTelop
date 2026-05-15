@@ -231,14 +231,11 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           $vcpkg = if ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } else { $env:VCPKG_ROOT }
-          # obs-deps contains w32-pthreads and other libobs transitive deps.
-          # Add it to CMAKE_PREFIX_PATH so find_dependency() in libobsConfig.cmake succeeds.
-          $deps = Get-ChildItem -Path "obs-studio/.deps" -Directory -Filter "obs-deps-*-x64" |
-                  Select-Object -First 1 -ExpandProperty FullName
+          $w32pt = "${{ github.workspace }}\cmake\w32-pthreads"
           cmake -B build `
             -G "Visual Studio 17 2022" -A x64 `
             -Dlibobs_DIR="$env:LIBOBS_DIR" `
-            -DCMAKE_PREFIX_PATH="$deps" `
+            -Dw32-pthreads_DIR="$w32pt" `
             -DCMAKE_TOOLCHAIN_FILE="${vcpkg}\scripts\buildsystems\vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows
         shell: pwsh
