@@ -255,12 +255,14 @@ jobs:
             Get-ChildItem -Path $deps -Recurse -Filter "*Config.cmake" |
               Select-Object -ExpandProperty FullName
           }
+          # CMAKE_MODULE_PATH provides Findw32-pthreads.cmake so that
+          # find_dependency(w32-pthreads) inside libobsConfig.cmake succeeds.
           # No vcpkg toolchain — CMAKE_PREFIX_PATH covers both obs-deps and vcpkg installed.
-          # Avoids vcpkg interception of find_dependency() calls from libobsConfig.cmake.
+          $modules = "${{ github.workspace }}\cmake\Modules"
           cmake -B build --log-level=VERBOSE `
             -G "Visual Studio 17 2022" -A x64 `
             -Dlibobs_DIR="$env:LIBOBS_DIR" `
-            -Dw32-pthreads_DIR="$w32pt" `
+            -DCMAKE_MODULE_PATH="$modules" `
             -DCMAKE_PREFIX_PATH="$deps;$vcpkgInst"
         shell: pwsh
 
