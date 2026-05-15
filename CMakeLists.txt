@@ -27,6 +27,7 @@ add_test(NAME SpeechToTelopTests COMMAND SpeechToTelopTests)
 # pre-satisfy it here rather than fighting with cmake module path resolution.
 if(MSVC AND NOT TARGET w32-pthreads::w32-pthreads)
     add_library(w32-pthreads::w32-pthreads INTERFACE IMPORTED GLOBAL)
+    add_library(OBS::w32-pthreads INTERFACE IMPORTED GLOBAL)
     set(w32-pthreads_FOUND TRUE)
 endif()
 
