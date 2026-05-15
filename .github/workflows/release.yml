@@ -173,7 +173,8 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           $vcpkg = if ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } else { $env:VCPKG_ROOT }
-          & "$vcpkg\vcpkg.exe" install curl:x64-windows gtest:x64-windows
+          # pthreads provides w32-pthreadsConfig.cmake needed by libobsConfig.cmake
+          & "$vcpkg\vcpkg.exe" install curl:x64-windows gtest:x64-windows pthreads:x64-windows
         shell: pwsh
 
       - name: Cache OBS build (Windows)
