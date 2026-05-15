@@ -246,23 +246,14 @@ jobs:
           $deps = Get-ChildItem -Path "obs-studio/.deps" -Directory -Filter "obs-deps-*-x64" `
                     -ErrorAction SilentlyContinue |
                   Select-Object -First 1 -ExpandProperty FullName
-          $w32pt = "${{ github.workspace }}\cmake\w32-pthreads"
           Write-Host "LIBOBS_DIR: $env:LIBOBS_DIR"
           Write-Host "obs-deps:   $deps"
           Write-Host "vcpkg inst: $vcpkgInst"
-          # List cmake configs available in obs-deps
-          if ($deps) {
-            Get-ChildItem -Path $deps -Recurse -Filter "*Config.cmake" |
-              Select-Object -ExpandProperty FullName
-          }
-          # CMAKE_MODULE_PATH provides Findw32-pthreads.cmake so that
-          # find_dependency(w32-pthreads) inside libobsConfig.cmake succeeds.
+          # w32-pthreads is pre-satisfied in CMakeLists.txt before find_package(libobs).
           # No vcpkg toolchain — CMAKE_PREFIX_PATH covers both obs-deps and vcpkg installed.
-          $modules = ("${{ github.workspace }}\cmake\Modules") -replace '\\','/'
-          cmake -B build --log-level=VERBOSE `
+          cmake -B build `
             -G "Visual Studio 17 2022" -A x64 `
             -Dlibobs_DIR="$env:LIBOBS_DIR" `
-            -DCMAKE_MODULE_PATH="$modules" `
             -DCMAKE_PREFIX_PATH="$deps;$vcpkgInst"
         shell: pwsh
 

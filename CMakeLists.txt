@@ -22,6 +22,14 @@ target_link_libraries(SpeechToTelopTests GTest::gtest_main)
 add_test(NAME SpeechToTelopTests COMMAND SpeechToTelopTests)
 
 # OBS plugin — only built when libobs is available
+# On MSVC, libobsConfig.cmake calls find_dependency(w32-pthreads REQUIRED).
+# find_dependency skips the search if <pkg>_FOUND is already TRUE, so we
+# pre-satisfy it here rather than fighting with cmake module path resolution.
+if(MSVC AND NOT TARGET w32-pthreads::w32-pthreads)
+    add_library(w32-pthreads::w32-pthreads INTERFACE IMPORTED GLOBAL)
+    set(w32-pthreads_FOUND TRUE)
+endif()
+
 find_package(libobs QUIET)
 find_package(CURL QUIET)
 
