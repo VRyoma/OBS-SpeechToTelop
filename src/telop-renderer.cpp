@@ -171,6 +171,12 @@ static std::vector<uint8_t> render_text_to_rgba(
     }
     if (out_w == 0 || out_h == 0) { Gdiplus::GdiplusShutdown(gdi_tok); return {}; }
 
+    auto argb_gdip = [](uint32_t argb) {
+        return Gdiplus::Color(
+            (argb >> 24) & 0xFF, (argb >> 16) & 0xFF,
+            (argb >>  8) & 0xFF,  argb        & 0xFF);
+    };
+
     Gdiplus::Bitmap bmp(out_w, out_h, PixelFormat32bppARGB);
     Gdiplus::Graphics* g = Gdiplus::Graphics::FromImage(&bmp);
     if (style.background)
@@ -183,12 +189,6 @@ static std::vector<uint8_t> render_text_to_rgba(
     Gdiplus::RectF rect(pad, pad,
         static_cast<float>(out_w) - pad * 2.f,
         static_cast<float>(out_h) - pad * 2.f);
-
-    auto argb_gdip = [](uint32_t argb) {
-        return Gdiplus::Color(
-            (argb >> 24) & 0xFF, (argb >> 16) & 0xFF,
-            (argb >>  8) & 0xFF,  argb        & 0xFF);
-    };
 
     if (style.shadow) {
         Gdiplus::SolidBrush sb(Gdiplus::Color(0xAA, 0, 0, 0));
