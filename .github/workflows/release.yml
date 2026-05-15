@@ -216,10 +216,17 @@ jobs:
       - name: Locate libobs cmake config (Windows)
         if: runner.os == 'Windows'
         run: |
-          $cfg = Get-ChildItem -Path obs-install,obs-build -Recurse `
+          # Prefer the installed config (obs-install) — build-tree config has broken targets.
+          $cfg = Get-ChildItem -Path obs-install -Recurse `
                    -Filter libobsConfig.cmake -ErrorAction SilentlyContinue |
                  Select-Object -First 1
+          if (-not $cfg) {
+            $cfg = Get-ChildItem -Path obs-build -Recurse `
+                     -Filter libobsConfig.cmake -ErrorAction SilentlyContinue |
+                   Select-Object -First 1
+          }
           if ($cfg) {
+            Write-Host "Using: $($cfg.FullName)"
             echo "LIBOBS_DIR=$($cfg.DirectoryName)" >> $env:GITHUB_ENV
           } else {
             Write-Error "libobsConfig.cmake not found"
@@ -230,30 +237,28 @@ jobs:
       - name: Inspect libobsConfig.cmake (Windows)
         if: runner.os == 'Windows'
         run: |
-          $cfg = Get-ChildItem -Path obs-install,obs-build -Recurse `
-                   -Filter libobsConfig.cmake -ErrorAction SilentlyContinue |
-                 Select-Object -First 1
-          if ($cfg) { Get-Content $cfg.FullName }
+          $cfg = "$env:LIBOBS_DIR\libobsConfig.cmake"
+          if (Test-Path $cfg) { Get-Content $cfg }
         shell: pwsh
 
       - name: Configure plugin (Windows)
         if: runner.os == 'Windows'
         run: |
           $vcpkg = if ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } else { $env:VCPKG_ROOT }
-          # vcpkg installed dir has cmake configs for curl and gtest
           $vcpkgInst = "$vcpkg\installed\x64-windows"
-          # obs-deps dir has cmake configs for zlib, jansson, w32-pthreads etc.
           $deps = Get-ChildItem -Path "obs-studio/.deps" -Directory -Filter "obs-deps-*-x64" `
                     -ErrorAction SilentlyContinue |
                   Select-Object -First 1 -ExpandProperty FullName
+          # Findw32-pthreads.cmake stub satisfies find_dependency(w32-pthreads) in libobsConfig.cmake
+          $modules = ("${{ github.workspace }}/cmake/Modules")
           Write-Host "LIBOBS_DIR: $env:LIBOBS_DIR"
+          Write-Host "modules:    $modules"
           Write-Host "obs-deps:   $deps"
           Write-Host "vcpkg inst: $vcpkgInst"
-          # w32-pthreads is pre-satisfied in CMakeLists.txt before find_package(libobs).
-          # No vcpkg toolchain — CMAKE_PREFIX_PATH covers both obs-deps and vcpkg installed.
           cmake -B build `
             -G "Visual Studio 17 2022" -A x64 `
             -Dlibobs_DIR="$env:LIBOBS_DIR" `
+            -DCMAKE_MODULE_PATH="$modules" `
             -DCMAKE_PREFIX_PATH="$deps;$vcpkgInst"
         shell: pwsh
 
